@@ -422,7 +422,16 @@ bool FWeaveInterpreter::ParseVar(const TArray<FString>& Tokens, int32& Index, FW
 		return false;
 	}
 
-	OutVar.VarName = Tokens[Index++];
+	FString VarName;
+	while (Index < Tokens.Num() && Tokens[Index] != TEXT(":"))
+	{
+		if (!VarName.IsEmpty())
+		{
+			VarName += TEXT(" ");
+		}
+		VarName += Tokens[Index++];
+	}
+	OutVar.VarName = VarName.TrimStartAndEnd();
 
 	if (Index >= Tokens.Num() || Tokens[Index] != TEXT(":"))
 	{
