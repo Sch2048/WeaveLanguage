@@ -1,0 +1,497 @@
+
+
+#include "Core/WeaveGenerator.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "K2Node.h"
+#include "K2Node_Event.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_MathExpression.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_BreakStruct.h"
+#include "K2Node_Variable.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
+#include "K2Node_FunctionEntry.h"
+#include "Engine/Blueprint.h"
+#include "Engine/BlueprintGeneratedClass.h"
+#include "K2Node_SpawnActorFromClass.h"
+#include "K2Node_ConstructObjectFromClass.h"
+#include "K2Node_DynamicCast.h"
+#include "K2Node_MacroInstance.h"
+
+bool FWeaveGenerator::Generate(const TArray<UEdGraphNode*>& SelectedNodes, UEdGraph* Graph, FString& OutWeaveCode)
+{
+	if (!Graph || SelectedNodes.Num() == 0)
+	{
+		return false;
+	}
+
+	
+	TSet<UEdGraphNode*> AllNodes;
+	for (UEdGraphNode* Node : SelectedNodes)
+	{
+		CollectDependencies(Node, AllNodes);
+	}
+
+	
+	FString Code;
+	
+	
+	UBlueprint* Blueprint = Cast<UBlueprint>(Graph->GetOuter());
+	if (Blueprint)
+	{
+		FString BPPath = Blueprint->GetPathName();
+		Code += FString::Printf(TEXT("graphset %s %s\n"), *Blueprint->GetName(), *BPPath);
+	}
+	
+	
+	Code += FString::Printf(TEXT("graph %s\n\n"), *Graph->GetName());
+
+	
+	
+	auto PinTypeToWeaveName = [](const UEdGraphPin* Pin) -> FString
+	{
+		FString Cat = Pin->PinType.PinCategory.ToString();
+		if (Cat == TEXT("bool"))   return TEXT("bool");
+		if (Cat == TEXT("int"))    return TEXT("int");
+		if (Cat == TEXT("int64"))  return TEXT("int64");
+		if (Cat == TEXT("real"))
+		{
+			return (Pin->PinType.PinSubCategory == UEdGraphSchema_K2::PC_Double)
+				? TEXT("double") : TEXT("float");
+		}
+		if (Cat == TEXT("string")) return TEXT("string");
+		if (Cat == TEXT("text"))   return TEXT("text");
+		if (Cat == TEXT("name"))   return TEXT("name");
+		if (Cat == TEXT("struct") && Pin->PinType.PinSubCategoryObject.IsValid())
+		{
+			if (UScriptStruct* S = Cast<UScriptStruct>(Pin->PinType.PinSubCategoryObject.Get()))
+				return S->GetName(); 
+		}
+		if (Cat == TEXT("byte") && Pin->PinType.PinSubCategoryObject.IsValid())
+		{
+			if (UEnum* E = Cast<UEnum>(Pin->PinType.PinSubCategoryObject.Get()))
+				return E->GetName(); 
+		}
+		
+		
+		
+		auto ClassToWeaveName = [](UClass* C) -> FString
+		{
+			if (UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(C))
+			{
+				if (UBlueprint* BP = Cast<UBlueprint>(BPGC->ClassGeneratedBy))
+					return BP->GetPathName();
+			}
+			return C->GetPrefixCPP() + C->GetName();
+		};
+		if (Cat == TEXT("object") && Pin->PinType.PinSubCategoryObject.IsValid())
+		{
+			if (UClass* C = Cast<UClass>(Pin->PinType.PinSubCategoryObject.Get()))
+				return ClassToWeaveName(C);
+		}
+		if (Cat == TEXT("class") && Pin->PinType.PinSubCategoryObject.IsValid())
+		{
+			if (UClass* C = Cast<UClass>(Pin->PinType.PinSubCategoryObject.Get()))
+				return TEXT("class:") + ClassToWeaveName(C);
+		}
+		return Cat; 
+	};
+
+	TMap<FString, FString> Variables; 
+	for (UEdGraphNode* Node : AllNodes)
+	{
+		if (UK2Node_VariableGet* VarGetNode = Cast<UK2Node_VariableGet>(Node))
+		{
+			FName VarName = VarGetNode->GetVarName();
+			UEdGraphPin* ValuePin = VarGetNode->FindPin(VarName, EGPD_Output);
+			if (ValuePin && !Variables.Contains(VarName.ToString()))
+				Variables.Add(VarName.ToString(), PinTypeToWeaveName(ValuePin));
+		}
+		else if (UK2Node_VariableSet* VarSetNode = Cast<UK2Node_VariableSet>(Node))
+		{
+			FName VarName = VarSetNode->GetVarName();
+			UEdGraphPin* ValuePin = VarSetNode->FindPin(VarName, EGPD_Input);
+			if (ValuePin && !Variables.Contains(VarName.ToString()))
+				Variables.Add(VarName.ToString(), PinTypeToWeaveName(ValuePin));
+		}
+	}
+	
+	
+	if (Variables.Num() > 0)
+	{
+		for (const auto& Var : Variables)
+		{
+			Code += FString::Printf(TEXT("var %s : %s\n"), *Var.Key, *Var.Value);
+		}
+		Code += TEXT("\n");
+	}
+
+	
+	TMap<UEdGraphNode*, FString> NodeIdMap;
+	int32 NodeCounter = 0;
+	
+	for (UEdGraphNode* Node : AllNodes)
+	{
+		
+		FString NodeId;
+		int32 Index = NodeCounter++;
+		int32 RepeatCount = (Index / 26) + 1;
+		TCHAR Letter = 'a' + (Index % 26);
+		
+		for (int32 i = 0; i < RepeatCount; i++)
+		{
+			NodeId.AppendChar(Letter);
+		}
+		
+		NodeIdMap.Add(Node, NodeId);
+		
+		
+		if (Node->IsA<UK2Node_FunctionEntry>())
+		{
+			
+			NodeIdMap[Node] = TEXT("entry");
+			continue;
+		}
+		
+		FString SchemaId = GetNodeSchemaId(Node);
+		
+		
+		if (SchemaId.Contains(TEXT(" ")))
+		{
+			SchemaId = FString::Printf(TEXT("\"%s\""), *SchemaId);
+		}
+		
+		 
+		int32 PosX = Node->NodePosX;
+		int32 PosY = Node->NodePosY;
+		
+		Code += FString::Printf(TEXT("node %s : %s @ (%d, %d)\n"), *NodeId, *SchemaId, PosX, PosY);
+	}
+	
+	Code += TEXT("\n");
+
+	 
+	TSet<FString> GeneratedLinks;
+	for (UEdGraphNode* Node : AllNodes)
+	{
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+				{
+					UEdGraphNode* LinkedNode = LinkedPin->GetOwningNode();
+					if (AllNodes.Contains(LinkedNode))
+					{
+						FString FromNodeId = NodeIdMap[Node];
+						FString ToNodeId = NodeIdMap[LinkedNode];
+						
+						FString FromPinName = Pin->PinName.ToString();
+						FString ToPinName = LinkedPin->PinName.ToString();
+						
+						 
+						if (FromPinName.Contains(TEXT(" ")))
+						{
+							FromPinName = FString::Printf(TEXT("\"%s\""), *FromPinName);
+						}
+						if (ToPinName.Contains(TEXT(" ")))
+						{
+							ToPinName = FString::Printf(TEXT("\"%s\""), *ToPinName);
+						}
+						
+						FString LinkCode = FString::Printf(TEXT("link %s.%s -> %s.%s"), 
+							*FromNodeId, *FromPinName,
+							*ToNodeId, *ToPinName);
+							
+						if (!GeneratedLinks.Contains(LinkCode))
+						{
+							Code += LinkCode + TEXT("\n");
+							GeneratedLinks.Add(LinkCode);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	Code += TEXT("\n");
+	
+	 
+	for (UEdGraphNode* Node : AllNodes)
+	{
+		FString NodeId = NodeIdMap[Node];
+		
+		 
+		if (UK2Node_MathExpression* MathNode = Cast<UK2Node_MathExpression>(Node))
+		{
+			if (!MathNode->Expression.IsEmpty())
+			{
+				FString EscapedExpr = MathNode->Expression.Replace(TEXT("\""), TEXT("\\\""));
+				Code += FString::Printf(TEXT("set %s.Expression = \"%s\"\n"), *NodeId, *EscapedExpr);
+			}
+		}
+		
+		 
+		TSet<FName> EmittedPins;
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Input && Pin->LinkedTo.Num() == 0)
+			{
+				 
+				if (Pin->ParentPin != nullptr) continue;
+				FString PinName = Pin->PinName.ToString();
+				if (PinName == TEXT("self") || PinName == TEXT("execute"))
+				{
+					continue;
+				}
+				 
+				if (EmittedPins.Contains(Pin->PinName)) continue;
+				
+				FString DefaultValue;
+				
+				 
+				if (!Pin->DefaultValue.IsEmpty())
+				{
+					DefaultValue = Pin->DefaultValue;
+				}
+				else if (Pin->DefaultObject != nullptr)
+				{
+					DefaultValue = Pin->DefaultObject->GetPathName();
+				}
+				else if (!Pin->DefaultTextValue.IsEmpty())
+				{
+					DefaultValue = Pin->DefaultTextValue.ToString();
+				}
+				
+				 
+				if (!DefaultValue.IsEmpty() && 
+					DefaultValue != TEXT("0") && 
+					DefaultValue != TEXT("0.0") && 
+					DefaultValue != TEXT("0.000000") &&
+					DefaultValue != TEXT("false") &&
+					DefaultValue != TEXT("None"))
+				{
+					Code += FString::Printf(TEXT("set %s.%s = %s\n"), *NodeId, *PinName, *DefaultValue);
+					EmittedPins.Add(Pin->PinName);
+				}
+			}
+		}
+	}
+
+	OutWeaveCode = Code;
+	return true;
+}
+
+void FWeaveGenerator::CollectDependencies(UEdGraphNode* Node, TSet<UEdGraphNode*>& OutNodes)
+{
+	if (!Node || OutNodes.Contains(Node))
+	{
+		return;
+	}
+
+	OutNodes.Add(Node);
+
+	 
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin->Direction == EGPD_Input)
+		{
+			for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+			{
+				CollectDependencies(LinkedPin->GetOwningNode(), OutNodes);
+			}
+		}
+	}
+}
+
+FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
+{
+	if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node))
+	{
+		 
+		UClass* OwnerClass = EventNode->EventReference.GetMemberParentClass();
+		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+		
+		 
+		if (ClassName.Len() > 1)
+		{
+			TCHAR FirstChar = ClassName[0];
+			TCHAR SecondChar = ClassName[1];
+			
+			if ((FirstChar == TEXT('U') || FirstChar == TEXT('A')) && FChar::IsUpper(SecondChar))
+			{
+				ClassName = ClassName.RightChop(1);
+			}
+		}
+		
+		return FString::Printf(TEXT("event.%s.%s"), *ClassName, *EventNode->EventReference.GetMemberName().ToString());
+	}
+	else if (UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
+	{
+		UFunction* Function = CallNode->GetTargetFunction();
+		if (Function)
+		{
+			UClass* OwnerClass = Function->GetOwnerClass();
+			FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+			
+			 
+			if (ClassName.Len() > 1)
+			{
+				TCHAR FirstChar = ClassName[0];
+				TCHAR SecondChar = ClassName[1];
+				
+				if ((FirstChar == TEXT('U') || FirstChar == TEXT('A')) && FChar::IsUpper(SecondChar))
+				{
+					ClassName = ClassName.RightChop(1);
+				}
+			}
+			
+			return FString::Printf(TEXT("call.%s.%s"), *ClassName, *Function->GetName());
+		}
+	}
+	else if (UK2Node_VariableGet* VarGetNode = Cast<UK2Node_VariableGet>(Node))
+	{
+		FName VarName = VarGetNode->GetVarName();
+		UClass* OwnerClass = VarGetNode->VariableReference.GetMemberParentClass();
+		
+		 
+		if (!OwnerClass)
+		{
+			if (UBlueprint* BP = Cast<UBlueprint>(Node->GetGraph()->GetOuter()))
+			{
+				OwnerClass = BP->GeneratedClass;
+			}
+		}
+		
+		if (OwnerClass)
+		{
+			return FString::Printf(TEXT("VariableGet.%s.%s"), 
+				*OwnerClass->GetName(), *VarName.ToString());
+		}
+		return FString::Printf(TEXT("VariableGet.%s"), *VarName.ToString());
+	}
+	else if (UK2Node_VariableSet* VarSetNode = Cast<UK2Node_VariableSet>(Node))
+	{
+		FName VarName = VarSetNode->GetVarName();
+		UClass* OwnerClass = VarSetNode->VariableReference.GetMemberParentClass();
+		
+		 
+		if (!OwnerClass)
+		{
+			if (UBlueprint* BP = Cast<UBlueprint>(Node->GetGraph()->GetOuter()))
+			{
+				OwnerClass = BP->GeneratedClass;
+			}
+		}
+		
+		if (OwnerClass)
+		{
+			return FString::Printf(TEXT("VariableSet.%s.%s"), 
+				*OwnerClass->GetName(), *VarName.ToString());
+		}
+		return FString::Printf(TEXT("VariableSet.%s"), *VarName.ToString());
+	}
+	
+	 
+	FString ClassName = Node->GetClass()->GetName();
+	
+	if (ClassName == TEXT("K2Node_ExecutionSequence"))
+	{
+		return TEXT("special.Sequence");
+	}
+	else if (ClassName == TEXT("K2Node_IfThenElse"))
+	{
+		return TEXT("special.Branch");
+	}
+	else if (ClassName == TEXT("K2Node_MathExpression"))
+	{
+		return TEXT("special.MathExpression");
+	}
+	else if (ClassName == TEXT("K2Node_MakeStruct"))
+	{
+		if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
+		{
+			if (MakeNode->StructType)
+			{
+				FString StructName = MakeNode->StructType->GetStructCPPName();
+				return FString::Printf(TEXT("special.Make.%s"), *StructName);
+			}
+		}
+		return TEXT("special.Make");
+	}
+	else if (ClassName == TEXT("K2Node_BreakStruct"))
+	{
+		if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+		{
+			if (BreakNode->StructType)
+			{
+				FString StructName = BreakNode->StructType->GetStructCPPName();
+				return FString::Printf(TEXT("special.Break.%s"), *StructName);
+			}
+		}
+		return TEXT("special.Break");
+	}
+	
+	else if (ClassName == TEXT("K2Node_SpawnActorFromClass"))
+	{
+		return TEXT("special.SpawnActorFromClass");
+	}
+	else if (ClassName == TEXT("K2Node_ConstructObjectFromClass"))
+	{
+		return TEXT("special.ConstructObjectFromClass");
+	}
+	else if (ClassName == TEXT("K2Node_DynamicCast"))
+	{
+		if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+		{
+			if (CastNode->TargetType)
+			{
+				FString TypeName = CastNode->TargetType->GetName();
+				if (TypeName.Len() > 1)
+				{
+					TCHAR First = TypeName[0];
+					TCHAR Second = TypeName[1];
+					if ((First == TEXT('A') || First == TEXT('U')) && FChar::IsUpper(Second))
+					{
+						TypeName = TypeName.RightChop(1);
+					}
+				}
+				return FString::Printf(TEXT("special.Cast.%s"), *TypeName);
+			}
+		}
+		return TEXT("special.Cast");
+	}
+	else if (ClassName == TEXT("K2Node_MacroInstance"))
+	{
+		if (UK2Node_MacroInstance* MacroNode = Cast<UK2Node_MacroInstance>(Node))
+		{
+			UEdGraph* MacroGraph = MacroNode->GetMacroGraph();
+			if (MacroGraph)
+			{
+				FString MacroName = MacroGraph->GetName();
+				UBlueprint* MacroBlueprint = Cast<UBlueprint>(MacroGraph->GetOuter());
+
+				if (MacroBlueprint)
+				{
+					FString BlueprintPath = MacroBlueprint->GetPathName();
+
+					 
+					if (BlueprintPath.Contains(TEXT("/Engine/EditorBlueprintResources/StandardMacros")))
+					{
+						return FString::Printf(TEXT("macro.StandardMacros.%s"), *MacroName);
+					}
+					else
+					{
+						 
+						return FString::Printf(TEXT("macro.%s:%s"), *BlueprintPath, *MacroName);
+					}
+				}
+			}
+		}
+	}
+
+	return ClassName;
+}

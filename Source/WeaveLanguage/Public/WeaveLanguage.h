@@ -1,14 +1,20 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+
 
 #pragma once
 
 #include "Modules/ModuleManager.h"
+#include "Framework/Application/IInputProcessor.h"
 
 class FWeaveLanguageModule : public IModuleInterface
 {
 public:
-
-	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+private:
+
+
+	void RegisterMenus();
+	void FillWeaverMenu(class UToolMenu* Menu);
+	void OnGenerateWeave();
+	void OnOpenDebugger();
 };
