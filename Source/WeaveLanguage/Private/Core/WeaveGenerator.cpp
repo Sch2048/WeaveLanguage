@@ -18,6 +18,23 @@
 #include "K2Node_DynamicCast.h"
 #include "K2Node_MacroInstance.h"
 
+namespace
+{
+	FString StripUEClassPrefix(const FString& ClassName)
+	{
+		if (ClassName.Len() > 1)
+		{
+			const TCHAR First = ClassName[0];
+			const TCHAR Second = ClassName[1];
+			if ((First == TEXT('U') || First == TEXT('A')) && FChar::IsUpper(Second))
+			{
+				return ClassName.RightChop(1);
+			}
+		}
+		return ClassName;
+	}
+}
+
 bool FWeaveGenerator::Generate(const TArray<UEdGraphNode*>& SelectedNodes, UEdGraph* Graph, FString& OutWeaveCode)
 {
 	if (!Graph || SelectedNodes.Num() == 0)
@@ -304,20 +321,7 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 	if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node))
 	{
 		UClass* OwnerClass = EventNode->EventReference.GetMemberParentClass();
-		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
-
-
-		if (ClassName.Len() > 1)
-		{
-			TCHAR FirstChar = ClassName[0];
-			TCHAR SecondChar = ClassName[1];
-
-			if ((FirstChar == TEXT('U') || FirstChar == TEXT('A')) && FChar::IsUpper(SecondChar))
-			{
-				ClassName = ClassName.RightChop(1);
-			}
-		}
-
+		FString ClassName = StripUEClassPrefix(OwnerClass ? OwnerClass->GetName() : TEXT("Unknown"));
 		return FString::Printf(TEXT("event.%s.%s"), *ClassName, *EventNode->EventReference.GetMemberName().ToString());
 	}
 	else if (const UK2Node_Message* MessageNode = Cast<UK2Node_Message>(Node))
@@ -325,17 +329,7 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 		if (const UFunction* Function = MessageNode->GetTargetFunction())
 		{
 			const UClass* OwnerClass = Function->GetOwnerClass();
-			FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
-			if (ClassName.Len() > 1)
-			{
-				TCHAR FirstChar = ClassName[0];
-				TCHAR SecondChar = ClassName[1];
-
-				if ((FirstChar == TEXT('U') || FirstChar == TEXT('A')) && FChar::IsUpper(SecondChar))
-				{
-					ClassName = ClassName.RightChop(1);
-				}
-			}
+			FString ClassName = StripUEClassPrefix(OwnerClass ? OwnerClass->GetName() : TEXT("Unknown"));
 			return FString::Printf(TEXT("message.%s.%s"), *ClassName, *Function->GetName());
 		}
 	}
@@ -344,20 +338,7 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 		if (const UFunction* Function = CallNode->GetTargetFunction())
 		{
 			const UClass* OwnerClass = Function->GetOwnerClass();
-			FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
-
-
-			if (ClassName.Len() > 1)
-			{
-				TCHAR FirstChar = ClassName[0];
-				TCHAR SecondChar = ClassName[1];
-
-				if ((FirstChar == TEXT('U') || FirstChar == TEXT('A')) && FChar::IsUpper(SecondChar))
-				{
-					ClassName = ClassName.RightChop(1);
-				}
-			}
-
+			FString ClassName = StripUEClassPrefix(OwnerClass ? OwnerClass->GetName() : TEXT("Unknown"));
 			return FString::Printf(TEXT("call.%s.%s"), *ClassName, *Function->GetName());
 		}
 	}
@@ -458,16 +439,7 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 		{
 			if (CastNode->TargetType)
 			{
-				FString TypeName = CastNode->TargetType->GetName();
-				if (TypeName.Len() > 1)
-				{
-					const TCHAR First = TypeName[0];
-					if (const TCHAR Second = TypeName[1]; (First == TEXT('A') || First == TEXT('U')) && FChar::IsUpper(
-						Second))
-					{
-						TypeName = TypeName.RightChop(1);
-					}
-				}
+				FString TypeName = StripUEClassPrefix(CastNode->TargetType->GetName());
 				return FString::Printf(TEXT("special.Cast.%s"), *TypeName);
 			}
 		}
