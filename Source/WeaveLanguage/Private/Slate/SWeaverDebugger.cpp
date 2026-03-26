@@ -258,6 +258,7 @@ FReply SWeaverDebugger::OnGenerateFromSelection()
 		{
 			if (IAssetEditorInstance* Editor = AssetEditorSubsystem->FindEditorForAsset(BP, false))
 			{
+				// Safe: outer loop guarantees Asset is UBlueprint, so Editor is FBlueprintEditor
 				FBlueprintEditor* BPEditor = static_cast<FBlueprintEditor*>(Editor);
 				if (BPEditor && BPEditor->GetSelectedNodes().Num() > 0)
 				{

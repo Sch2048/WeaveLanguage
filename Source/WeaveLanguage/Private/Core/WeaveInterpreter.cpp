@@ -23,6 +23,31 @@
 #include "K2Node_ConstructObjectFromClass.h"
 #include "K2Node_DynamicCast.h"
 
+namespace
+{
+	// 编程式创建 K2Node 的标准流程。
+	// 不调用 PostPlacedNewNode —— 该函数设计给用户通过 UI 放置节点时使用，
+	// 此时节点的关键属性（FunctionReference、MacroGraph 等）已由 Action 设置好。
+	// 编程式创建中属性尚未设置就调用它，会导致 SpawnActorFromClass 等节点空指针崩溃。
+	// 节点的完整初始化由调用者通过 Set*/ReconstructNode 完成。
+	template <typename T>
+	T* SpawnEditorNode(UEdGraph* Graph, bool bAllocatePins = true)
+	{
+		T* Node = NewObject<T>(Graph, NAME_None, RF_Transactional);
+		if (Graph->HasAnyFlags(RF_Transient))
+		{
+			Node->SetFlags(RF_Transient);
+		}
+		Graph->AddNode(Node, false, false);
+		Node->CreateNewGuid();
+		if (bAllocatePins && Node->Pins.Num() == 0)
+		{
+			Node->AllocateDefaultPins();
+		}
+		return Node;
+	}
+}
+
 bool FWeaveInterpreter::Parse(const FString& WeaveCode, FWeaveAST& OutAST, FString& OutError)
 {
 	TArray<FString> Tokens = Tokenize(WeaveCode);
@@ -1388,12 +1413,9 @@ UK2Node* FWeaveInterpreter::CreateEventNode(UEdGraph* Graph, const FString& Clas
 		}
 	}
 
-	UK2Node_Event* EventNode = Graph->CreateIntermediateNode<UK2Node_Event>();
+	UK2Node_Event* EventNode = SpawnEditorNode<UK2Node_Event>(Graph, false);
 	if (EventNode)
 	{
-		EventNode->CreateNewGuid();
-
-
 		FString FullClassName = ClassName;
 		if (ClassName == TEXT("Actor"))
 		{
@@ -1410,12 +1432,9 @@ UK2Node* FWeaveInterpreter::CreateEventNode(UEdGraph* Graph, const FString& Clas
 
 UK2Node* FWeaveInterpreter::CreateCallNode(UEdGraph* Graph, const FString& ClassName, const FString& FunctionName)
 {
-	UK2Node_CallFunction* CallNode = Graph->CreateIntermediateNode<UK2Node_CallFunction>();
+	UK2Node_CallFunction* CallNode = SpawnEditorNode<UK2Node_CallFunction>(Graph, false);
 	if (CallNode)
 	{
-		CallNode->CreateNewGuid();
-
-
 		static const TMap<FString, FString> FuncNameTranslation = {
 			{TEXT("Conv_FloatToString"), TEXT("Conv_DoubleToString")},
 			{TEXT("Conv_FloatToInt"), TEXT("Conv_DoubleToInt")},
@@ -1491,13 +1510,11 @@ UK2Node* FWeaveInterpreter::CreateCallNode(UEdGraph* Graph, const FString& Class
 
 UK2Node* FWeaveInterpreter::CreateMessageNode(UEdGraph* Graph, const FString& ClassName, const FString& FunctionName)
 {
-	UK2Node_Message* MessageNode = Graph->CreateIntermediateNode<UK2Node_Message>();
+	UK2Node_Message* MessageNode = SpawnEditorNode<UK2Node_Message>(Graph, false);
 	if (!MessageNode)
 	{
 		return nullptr;
 	}
-
-	MessageNode->CreateNewGuid();
 
 	static const TMap<FString, FString> FuncNameTranslation = {
 		{TEXT("Conv_FloatToString"), TEXT("Conv_DoubleToString")},
@@ -1573,11 +1590,9 @@ UK2Node* FWeaveInterpreter::CreateMessageNode(UEdGraph* Graph, const FString& Cl
 }
 UK2Node* FWeaveInterpreter::CreateMacroNode(UEdGraph* Graph, const FString& MacroPath, const FString& MacroName)
 {
-	UK2Node_MacroInstance* MacroNode = Graph->CreateIntermediateNode<UK2Node_MacroInstance>();
+	UK2Node_MacroInstance* MacroNode = SpawnEditorNode<UK2Node_MacroInstance>(Graph, false);
 	if (MacroNode)
 	{
-		MacroNode->CreateNewGuid();
-
 		UE_LOG(LogTemp, Log, TEXT("[Weaver] Loading macro: Path=%s, Name=%s"), *MacroPath, *MacroName);
 
 
@@ -1624,36 +1639,19 @@ UK2Node* FWeaveInterpreter::CreateMacroNode(UEdGraph* Graph, const FString& Macr
 
 UK2Node* FWeaveInterpreter::CreateBranchNode(UEdGraph* Graph)
 {
-	UK2Node_IfThenElse* BranchNode = Graph->CreateIntermediateNode<UK2Node_IfThenElse>();
-	if (BranchNode)
-	{
-		BranchNode->CreateNewGuid();
-		BranchNode->AllocateDefaultPins();
-		BranchNode->ReconstructNode();
-	}
+	UK2Node_IfThenElse* BranchNode = SpawnEditorNode<UK2Node_IfThenElse>(Graph);
 	return BranchNode;
 }
 
 UK2Node* FWeaveInterpreter::CreateSequenceNode(UEdGraph* Graph)
 {
-	UK2Node_ExecutionSequence* SequenceNode = Graph->CreateIntermediateNode<UK2Node_ExecutionSequence>();
-	if (SequenceNode)
-	{
-		SequenceNode->CreateNewGuid();
-		SequenceNode->AllocateDefaultPins();
-		SequenceNode->ReconstructNode();
-	}
+	UK2Node_ExecutionSequence* SequenceNode = SpawnEditorNode<UK2Node_ExecutionSequence>(Graph);
 	return SequenceNode;
 }
 
 UK2Node* FWeaveInterpreter::CreateMathExpressionNode(UEdGraph* Graph)
 {
-	UK2Node_MathExpression* MathNode = Graph->CreateIntermediateNode<UK2Node_MathExpression>();
-	if (MathNode)
-	{
-		MathNode->CreateNewGuid();
-		MathNode->AllocateDefaultPins();
-	}
+	UK2Node_MathExpression* MathNode = SpawnEditorNode<UK2Node_MathExpression>(Graph);
 	return MathNode;
 }
 
@@ -1671,11 +1669,10 @@ UK2Node* FWeaveInterpreter::CreateMakeStructNode(UEdGraph* Graph, const FString&
 
 	if (StructType)
 	{
-		UK2Node_MakeStruct* MakeNode = Graph->CreateIntermediateNode<UK2Node_MakeStruct>();
+		UK2Node_MakeStruct* MakeNode = SpawnEditorNode<UK2Node_MakeStruct>(Graph, false);
 		if (MakeNode)
 		{
 			MakeNode->StructType = StructType;
-			MakeNode->CreateNewGuid();
 			MakeNode->AllocateDefaultPins();
 
 
@@ -1717,11 +1714,10 @@ UK2Node* FWeaveInterpreter::CreateBreakStructNode(UEdGraph* Graph, const FString
 
 	if (StructType)
 	{
-		UK2Node_BreakStruct* BreakNode = Graph->CreateIntermediateNode<UK2Node_BreakStruct>();
+		UK2Node_BreakStruct* BreakNode = SpawnEditorNode<UK2Node_BreakStruct>(Graph, false);
 		if (BreakNode)
 		{
 			BreakNode->StructType = StructType;
-			BreakNode->CreateNewGuid();
 			BreakNode->AllocateDefaultPins();
 
 
@@ -1751,12 +1747,9 @@ UK2Node* FWeaveInterpreter::CreateBreakStructNode(UEdGraph* Graph, const FString
 
 UK2Node* FWeaveInterpreter::CreateVariableGetNode(UEdGraph* Graph, UBlueprint* Blueprint, const FString& VarName)
 {
-	UK2Node_VariableGet* VarGetNode = Graph->CreateIntermediateNode<UK2Node_VariableGet>();
+	UK2Node_VariableGet* VarGetNode = SpawnEditorNode<UK2Node_VariableGet>(Graph, false);
 	if (VarGetNode)
 	{
-		VarGetNode->CreateNewGuid();
-
-
 		FName VarFName = FName(*VarName);
 		VarGetNode->VariableReference.SetSelfMember(VarFName);
 		VarGetNode->AllocateDefaultPins();
@@ -1766,12 +1759,9 @@ UK2Node* FWeaveInterpreter::CreateVariableGetNode(UEdGraph* Graph, UBlueprint* B
 
 UK2Node* FWeaveInterpreter::CreateVariableSetNode(UEdGraph* Graph, UBlueprint* Blueprint, const FString& VarName)
 {
-	UK2Node_VariableSet* VarSetNode = Graph->CreateIntermediateNode<UK2Node_VariableSet>();
+	UK2Node_VariableSet* VarSetNode = SpawnEditorNode<UK2Node_VariableSet>(Graph, false);
 	if (VarSetNode)
 	{
-		VarSetNode->CreateNewGuid();
-
-
 		FName VarFName = FName(*VarName);
 		VarSetNode->VariableReference.SetSelfMember(VarFName);
 		VarSetNode->AllocateDefaultPins();
@@ -1781,34 +1771,21 @@ UK2Node* FWeaveInterpreter::CreateVariableSetNode(UEdGraph* Graph, UBlueprint* B
 
 UK2Node* FWeaveInterpreter::CreateSpawnActorFromClassNode(UEdGraph* Graph)
 {
-	UK2Node_SpawnActorFromClass* SpawnNode = Graph->CreateIntermediateNode<UK2Node_SpawnActorFromClass>();
-	if (SpawnNode)
-	{
-		SpawnNode->CreateNewGuid();
-		SpawnNode->AllocateDefaultPins();
-	}
+	UK2Node_SpawnActorFromClass* SpawnNode = SpawnEditorNode<UK2Node_SpawnActorFromClass>(Graph);
 	return SpawnNode;
 }
 
 UK2Node* FWeaveInterpreter::CreateConstructObjectFromClassNode(UEdGraph* Graph)
 {
-	UK2Node_ConstructObjectFromClass* ConstructNode = Graph->CreateIntermediateNode<UK2Node_ConstructObjectFromClass>();
-	if (ConstructNode)
-	{
-		ConstructNode->CreateNewGuid();
-		ConstructNode->AllocateDefaultPins();
-	}
+	UK2Node_ConstructObjectFromClass* ConstructNode = SpawnEditorNode<UK2Node_ConstructObjectFromClass>(Graph);
 	return ConstructNode;
 }
 
 UK2Node* FWeaveInterpreter::CreateDynamicCastNode(UEdGraph* Graph, const FString& TargetTypeName)
 {
-	UK2Node_DynamicCast* CastNode = Graph->CreateIntermediateNode<UK2Node_DynamicCast>();
+	UK2Node_DynamicCast* CastNode = SpawnEditorNode<UK2Node_DynamicCast>(Graph, false);
 	if (CastNode)
 	{
-		CastNode->CreateNewGuid();
-
-
 		UClass* TargetClass = UClass::TryFindTypeSlow<UClass>(*(TEXT("A") + TargetTypeName));
 		if (!TargetClass) TargetClass = UClass::TryFindTypeSlow<UClass>(*(TEXT("U") + TargetTypeName));
 		if (!TargetClass) TargetClass = UClass::TryFindTypeSlow<UClass>(*TargetTypeName);
@@ -1822,7 +1799,6 @@ UK2Node* FWeaveInterpreter::CreateDynamicCastNode(UEdGraph* Graph, const FString
 			UE_LOG(LogTemp, Warning, TEXT("[Weaver] CreateDynamicCastNode: Type not found: %s"), *TargetTypeName);
 		}
 
-		CastNode->AllocateDefaultPins();
 		CastNode->ReconstructNode();
 	}
 	return CastNode;
@@ -1857,12 +1833,10 @@ UK2Node* FWeaveInterpreter::CreateSwitchEnumNode(UEdGraph* Graph, const FString&
 		return nullptr;
 	}
 
-	UK2Node_SwitchEnum* SwitchNode = Graph->CreateIntermediateNode<UK2Node_SwitchEnum>();
+	UK2Node_SwitchEnum* SwitchNode = SpawnEditorNode<UK2Node_SwitchEnum>(Graph, false);
 	if (SwitchNode)
 	{
-		SwitchNode->CreateNewGuid();
-
-		// 直接设置 public UPROPERTY 成员，绕开 SetEnum（该函数在某些版本仍可能因 MinimalAPI 未导出导致跨模块链接失败）
+		// 直接设置 public UPROPERTY 成员，绕开 SetEnum（5.3 未导出该函数）
 		SwitchNode->Enum = TargetEnum;
 		SwitchNode->EnumEntries.Empty();
 		SwitchNode->EnumFriendlyNames.Empty();

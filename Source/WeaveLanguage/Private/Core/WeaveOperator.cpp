@@ -31,11 +31,6 @@ FString UWeaveOperator::CachedResultWeave;
 TMap<FString, TArray<int32>> UWeaveOperator::KeywordIndex;
 TMap<FString, int32> UWeaveOperator::IdIndex;
 
-void UWeaveOperator::ExecuteOperation()
-{
-	UE_LOG(LogTemp, Log, TEXT("Weaver Operation Executed"));
-}
-
 TArray<FString> UWeaveOperator::GenerateKeywords(const FString& Title)
 {
 	TArray<FString> Keywords;
@@ -150,7 +145,8 @@ TSharedPtr<FJsonObject> UWeaveOperator::NodeToJson(UEdGraphNode* Node)
 	{
 		FString EventName = EventNode->EventReference.GetMemberName().ToString();
 		UClass* OwnerClass = EventNode->EventReference.GetMemberParentClass();
-		FString ClassName = OwnerClass ? OwnerClass->GetName().Replace(TEXT("_C"), TEXT("")) : TEXT("Unknown");
+		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+		ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 		JsonNode->SetStringField(TEXT("id"), FString::Printf(TEXT("event.%s.%s"), *ClassName, *EventName));
@@ -221,7 +217,8 @@ TSharedPtr<FJsonObject> UWeaveOperator::NodeToJson(UEdGraphNode* Node)
 
 		FString MemberName = FuncNode->FunctionReference.GetMemberName().ToString();
 		UClass* OwnerClass = Function->GetOwnerClass();
-		FString ClassName = OwnerClass ? OwnerClass->GetName().Replace(TEXT("_C"), TEXT("")) : TEXT("Unknown");
+		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+		ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 		JsonNode->SetStringField(TEXT("id"), FString::Printf(TEXT("call.%s.%s"), *ClassName, *MemberName));
@@ -381,7 +378,8 @@ void UWeaveOperator::GenerateWeaveLanguage()
 			}
 
 			FString MemberName = Function->GetName();
-			FString ClassName = Class->GetName().Replace(TEXT("_C"), TEXT(""));
+			FString ClassName = Class->GetName();
+			ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 			if (Function->HasAnyFunctionFlags(FUNC_BlueprintEvent))
