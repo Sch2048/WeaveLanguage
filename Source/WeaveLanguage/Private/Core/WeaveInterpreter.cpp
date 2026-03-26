@@ -25,6 +25,11 @@
 
 namespace
 {
+	// 编程式创建 K2Node 的标准流程。
+	// 不调用 PostPlacedNewNode —— 该函数设计给用户通过 UI 放置节点时使用，
+	// 此时节点的关键属性（FunctionReference、MacroGraph 等）已由 Action 设置好。
+	// 编程式创建中属性尚未设置就调用它，会导致 SpawnActorFromClass 等节点空指针崩溃。
+	// 节点的完整初始化由调用者通过 Set*/ReconstructNode 完成。
 	template <typename T>
 	T* SpawnEditorNode(UEdGraph* Graph, bool bAllocatePins = true)
 	{
@@ -35,7 +40,6 @@ namespace
 		}
 		Graph->AddNode(Node, false, false);
 		Node->CreateNewGuid();
-		Node->PostPlacedNewNode();
 		if (bAllocatePins && Node->Pins.Num() == 0)
 		{
 			Node->AllocateDefaultPins();
