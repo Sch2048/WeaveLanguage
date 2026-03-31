@@ -12,10 +12,6 @@ class WEAVELANGUAGE_API UWeaveOperator : public UObject
 
 public:
 	UFUNCTION(BlueprintCallable, Category="Weaver")
-	static void ExecuteOperation();
-
-
-	UFUNCTION(BlueprintCallable, Category="Weaver")
 	static void GenerateWeaveLanguage();
 
 

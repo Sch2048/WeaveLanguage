@@ -8,6 +8,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "EditorStyleSet.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "EdGraphSchema_K2.h"
 #include "EdGraph/EdGraph.h"
 #include "Editor.h"
 #include "Selection.h"
@@ -143,10 +144,20 @@ FReply SWeaverDebugger::OnApply()
 
 
 	FString Result = FString::Printf(
-		TEXT("Parse successful!\n\nBlueprint: %s\nGraph: %s\nNodes: %d\nSets: %d\nLinks: %d\n\n"),
-		*AST.BlueprintPath, *AST.GraphName, AST.Nodes.Num(), AST.Sets.Num(), AST.Links.Num()
+		TEXT("Parse successful!\n\nBlueprint: %s\nGraph: %s\nSections: %d\nNodes: %d\nSets: %d\nLinks: %d\n\n"),
+		*AST.BlueprintPath, *AST.GraphName, AST.Sections.Num(), AST.Nodes.Num(), AST.Sets.Num(), AST.Links.Num()
 	);
 
+	if (AST.Sections.Num() > 1)
+	{
+		for (int32 i = 0; i < AST.Sections.Num(); i++)
+		{
+			const FWeaveGraphSection& Sec = AST.Sections[i];
+			Result += FString::Printf(TEXT("[Section %d] graph %s: %d nodes, %d links\n"),
+				i, *Sec.GraphName, Sec.Nodes.Num(), Sec.Links.Num());
+		}
+		Result += TEXT("\n");
+	}
 
 	for (const FWeaveNodeDecl& Node : AST.Nodes)
 	{
@@ -160,22 +171,35 @@ FReply SWeaverDebugger::OnApply()
 		UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *AST.BlueprintPath);
 		if (BP)
 		{
-			UEdGraph* TargetGraph = nullptr;
-
-
-			for (UEdGraph* Graph : BP->UbergraphPages)
+			// 多图表模式
+			if (AST.Sections.Num() > 1)
 			{
-				if (Graph && Graph->GetName().Contains(AST.GraphName))
+				Result += FString::Printf(TEXT("\nMulti-graph mode: %d sections\n"), AST.Sections.Num());
+				for (const FWeaveGraphSection& Sec : AST.Sections)
 				{
-					TargetGraph = Graph;
-					break;
+					Result += FString::Printf(TEXT("  - %s (%d nodes, %d links)\n"),
+						*Sec.GraphName, Sec.Nodes.Num(), Sec.Links.Num());
+				}
+
+				FString GenError;
+				int32 NodesCreated = FWeaveInterpreter::GenerateMultiGraph(AST, BP, GenError);
+
+				if (NodesCreated > 0)
+				{
+					Result += FString::Printf(TEXT("\nGenerated %d nodes across %d graphs successfully!"),
+						NodesCreated, AST.Sections.Num());
+				}
+				else
+				{
+					Result += FString::Printf(TEXT("\nGeneration failed: %s"), *GenError);
 				}
 			}
-
-
-			if (!TargetGraph)
+			else
 			{
-				for (UEdGraph* Graph : BP->FunctionGraphs)
+				// 单图表模式（原有逻辑）
+				UEdGraph* TargetGraph = nullptr;
+
+				for (UEdGraph* Graph : BP->UbergraphPages)
 				{
 					if (Graph && Graph->GetName().Contains(AST.GraphName))
 					{
@@ -183,28 +207,59 @@ FReply SWeaverDebugger::OnApply()
 						break;
 					}
 				}
-			}
 
-			if (TargetGraph)
-			{
-				Result += FString::Printf(TEXT("\nTarget Graph: %s\n"), *TargetGraph->GetName());
-
-				FString GenError;
-				int32 NodesCreated = FWeaveInterpreter::GenerateBlueprint(AST, TargetGraph, GenError);
-
-				if (NodesCreated > 0)
+				if (!TargetGraph)
 				{
-					Result += FString::Printf(TEXT("Generated %d nodes successfully!"), NodesCreated);
-					BP->MarkPackageDirty();
+					for (UEdGraph* Graph : BP->FunctionGraphs)
+					{
+						if (Graph && Graph->GetName().Contains(AST.GraphName))
+						{
+							TargetGraph = Graph;
+							break;
+						}
+					}
+				}
+
+				if (!TargetGraph && !AST.GraphName.Contains(TEXT("EventGraph")))
+				{
+					UEdGraph* NewFuncGraph = FBlueprintEditorUtils::CreateNewGraph(
+						BP, FName(*AST.GraphName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+					if (NewFuncGraph)
+					{
+						FBlueprintEditorUtils::AddFunctionGraph<UClass>(BP, NewFuncGraph, true, nullptr);
+						FKismetEditorUtilities::CompileBlueprint(BP);
+						TargetGraph = NewFuncGraph;
+						UE_LOG(LogTemp, Log, TEXT("[Weaver Debugger] Auto-created function graph: %s"), *AST.GraphName);
+					}
+				}
+
+				if (!TargetGraph && BP->UbergraphPages.Num() > 0)
+				{
+					TargetGraph = BP->UbergraphPages[0];
+					UE_LOG(LogTemp, Log, TEXT("[Weaver Debugger] Falling back to default UbergraphPage: %s"), *TargetGraph->GetName());
+				}
+
+				if (TargetGraph)
+				{
+					Result += FString::Printf(TEXT("\nTarget Graph: %s\n"), *TargetGraph->GetName());
+
+					FString GenError;
+					int32 NodesCreated = FWeaveInterpreter::GenerateBlueprint(AST, TargetGraph, GenError);
+
+					if (NodesCreated > 0)
+					{
+						Result += FString::Printf(TEXT("Generated %d nodes successfully!"), NodesCreated);
+						BP->MarkPackageDirty();
+					}
+					else
+					{
+						Result += FString::Printf(TEXT("Generation failed: %s"), *GenError);
+					}
 				}
 				else
 				{
-					Result += FString::Printf(TEXT("Generation failed: %s"), *GenError);
+					Result += TEXT("\nError: Graph not found in blueprint");
 				}
-			}
-			else
-			{
-				Result += TEXT("\nError: Graph not found in blueprint");
 			}
 		}
 		else
@@ -258,6 +313,7 @@ FReply SWeaverDebugger::OnGenerateFromSelection()
 		{
 			if (IAssetEditorInstance* Editor = AssetEditorSubsystem->FindEditorForAsset(BP, false))
 			{
+				// Safe: outer loop guarantees Asset is UBlueprint, so Editor is FBlueprintEditor
 				FBlueprintEditor* BPEditor = static_cast<FBlueprintEditor*>(Editor);
 				if (BPEditor && BPEditor->GetSelectedNodes().Num() > 0)
 				{
