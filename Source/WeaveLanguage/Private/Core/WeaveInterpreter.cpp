@@ -685,20 +685,21 @@ bool FWeaveInterpreter::ParseComment(const TArray<FString>& Tokens, int32& Index
 		if (Index >= Tokens.Num() || Tokens[Index] != TEXT("(")) return false;
 		Index++; // (
 
+		// 颜色值为 0-255 整数格式
 		if (Index >= Tokens.Num()) return false;
-		OutComment.Color.R = FCString::Atof(*Tokens[Index++]);
+		OutComment.Color.R = FCString::Atoi(*Tokens[Index++]) / 255.f;
 		if (Index >= Tokens.Num() || Tokens[Index] != TEXT(",")) return false;
 		Index++;
 		if (Index >= Tokens.Num()) return false;
-		OutComment.Color.G = FCString::Atof(*Tokens[Index++]);
+		OutComment.Color.G = FCString::Atoi(*Tokens[Index++]) / 255.f;
 		if (Index >= Tokens.Num() || Tokens[Index] != TEXT(",")) return false;
 		Index++;
 		if (Index >= Tokens.Num()) return false;
-		OutComment.Color.B = FCString::Atof(*Tokens[Index++]);
+		OutComment.Color.B = FCString::Atoi(*Tokens[Index++]) / 255.f;
 		if (Index >= Tokens.Num() || Tokens[Index] != TEXT(",")) return false;
 		Index++;
 		if (Index >= Tokens.Num()) return false;
-		OutComment.Color.A = FCString::Atof(*Tokens[Index++]);
+		OutComment.Color.A = FCString::Atoi(*Tokens[Index++]) / 255.f;
 
 		if (Index >= Tokens.Num() || Tokens[Index] != TEXT(")")) return false;
 		Index++; // )

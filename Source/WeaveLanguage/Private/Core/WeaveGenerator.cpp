@@ -373,10 +373,15 @@ bool FWeaveGenerator::Generate(const TArray<UEdGraphNode*>& SelectedNodes, UEdGr
 			int32 SizeY = CommentNode->NodeHeight;
 
 			// comment "文本" @ (X, Y) size (W, H) color (R, G, B, A) fontsize N
+			// 颜色用 0-255 整数避免浮点数中的 . 被 Tokenizer 拆分
 			FLinearColor Color = CommentNode->CommentColor;
-			Code += FString::Printf(TEXT("comment \"%s\" @ (%d, %d) size (%d, %d) color (%f, %f, %f, %f) fontsize %d\n"),
+			int32 R = FMath::RoundToInt(FMath::Clamp(Color.R, 0.f, 1.f) * 255);
+			int32 G = FMath::RoundToInt(FMath::Clamp(Color.G, 0.f, 1.f) * 255);
+			int32 B = FMath::RoundToInt(FMath::Clamp(Color.B, 0.f, 1.f) * 255);
+			int32 A = FMath::RoundToInt(FMath::Clamp(Color.A, 0.f, 1.f) * 255);
+			Code += FString::Printf(TEXT("comment \"%s\" @ (%d, %d) size (%d, %d) color (%d, %d, %d, %d) fontsize %d\n"),
 				*CommentText, PosX, PosY, SizeX, SizeY,
-				Color.R, Color.G, Color.B, Color.A,
+				R, G, B, A,
 				CommentNode->FontSize);
 		}
 	}
