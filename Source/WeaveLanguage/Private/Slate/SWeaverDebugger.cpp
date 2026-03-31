@@ -8,6 +8,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "EditorStyleSet.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "EdGraphSchema_K2.h"
 #include "EdGraph/EdGraph.h"
 #include "Editor.h"
 #include "Selection.h"
@@ -185,6 +186,28 @@ FReply SWeaverDebugger::OnApply()
 				}
 			}
 
+			// 如果找不到目标图表，尝试自动创建同名函数图表
+			// （仅当 GraphName 不是 EventGraph 类型时）
+			if (!TargetGraph && !AST.GraphName.Contains(TEXT("EventGraph")))
+			{
+				UEdGraph* NewFuncGraph = FBlueprintEditorUtils::CreateNewGraph(
+					BP, FName(*AST.GraphName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+				if (NewFuncGraph)
+				{
+					FBlueprintEditorUtils::AddFunctionGraph<UClass>(BP, NewFuncGraph, true, nullptr);
+					FKismetEditorUtilities::CompileBlueprint(BP);
+					TargetGraph = NewFuncGraph;
+					UE_LOG(LogTemp, Log, TEXT("[Weaver Debugger] Auto-created function graph: %s"), *AST.GraphName);
+				}
+			}
+
+			// 如果仍找不到（EventGraph 类型），回退到第一个 UbergraphPage
+			if (!TargetGraph && BP->UbergraphPages.Num() > 0)
+			{
+				TargetGraph = BP->UbergraphPages[0];
+				UE_LOG(LogTemp, Log, TEXT("[Weaver Debugger] Falling back to default UbergraphPage: %s"), *TargetGraph->GetName());
+			}
+
 			if (TargetGraph)
 			{
 				Result += FString::Printf(TEXT("\nTarget Graph: %s\n"), *TargetGraph->GetName());
@@ -258,6 +281,7 @@ FReply SWeaverDebugger::OnGenerateFromSelection()
 		{
 			if (IAssetEditorInstance* Editor = AssetEditorSubsystem->FindEditorForAsset(BP, false))
 			{
+				// Safe: outer loop guarantees Asset is UBlueprint, so Editor is FBlueprintEditor
 				FBlueprintEditor* BPEditor = static_cast<FBlueprintEditor*>(Editor);
 				if (BPEditor && BPEditor->GetSelectedNodes().Num() > 0)
 				{

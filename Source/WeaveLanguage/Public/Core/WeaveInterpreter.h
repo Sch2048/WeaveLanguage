@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "EdGraph/EdGraphPin.h"
+#include "Math/Color.h"
 
 
 struct FWeaveNodeDecl
@@ -30,6 +32,17 @@ struct FWeaveVarDecl
 {
 	FString VarName;
 	FString VarType;
+	EPinContainerType ContainerType = EPinContainerType::None;
+	FString ValueType; // Map 的 Value 类型（Key 类型存在 VarType 中）
+};
+
+struct FWeaveCommentDecl
+{
+	FString Text;
+	FVector2D Position;
+	FVector2D Size;
+	FLinearColor Color = FLinearColor(1.f, 1.f, 1.f, 1.f);
+	int32 FontSize = 18;
 };
 
 struct FWeaveAST
@@ -40,6 +53,7 @@ struct FWeaveAST
 	TArray<FWeaveNodeDecl> Nodes;
 	TArray<FWeaveSetStmt> Sets;
 	TArray<FWeaveLinkStmt> Links;
+	TArray<FWeaveCommentDecl> Comments;
 };
 
 class WEAVELANGUAGE_API FWeaveInterpreter
@@ -67,11 +81,12 @@ private:
 
 
 	static bool ParseVar(const TArray<FString>& Tokens, int32& Index, FWeaveVarDecl& OutVar);
+	static bool ParseComment(const TArray<FString>& Tokens, int32& Index, FWeaveCommentDecl& OutComment);
 
 
 	static UK2Node* CreateEventNode(UEdGraph* Graph, const FString& ClassName, const FString& EventName);
 	static UK2Node* CreateCallNode(UEdGraph* Graph, const FString& ClassName, const FString& FunctionName);
-	static UK2Node* CreateMessageNode(UEdGraph* Graph, const FString& ClassName, const FString& FunctionName);
+    static UK2Node* CreateMessageNode(UEdGraph* Graph, const FString& ClassName, const FString& FunctionName);
 	static UK2Node* CreateMacroNode(UEdGraph* Graph, const FString& MacroPath, const FString& MacroName);
 	static UK2Node* CreateBranchNode(UEdGraph* Graph);
 	static UK2Node* CreateSequenceNode(UEdGraph* Graph);
@@ -79,9 +94,14 @@ private:
 	static UK2Node* CreateMakeStructNode(UEdGraph* Graph, const FString& StructTypeName);
 	static UK2Node* CreateBreakStructNode(UEdGraph* Graph, const FString& StructTypeName);
 	static UK2Node* CreateVariableGetNode(UEdGraph* Graph, UBlueprint* Blueprint, const FString& VarName);
+	static UK2Node* CreateVariableGetNodeExternal(UEdGraph* Graph, UClass* OwnerClass, const FString& VarName);
 	static UK2Node* CreateVariableSetNode(UEdGraph* Graph, UBlueprint* Blueprint, const FString& VarName);
+	static UK2Node* CreateVariableSetNodeExternal(UEdGraph* Graph, UClass* OwnerClass, const FString& VarName);
 	static UK2Node* CreateSpawnActorFromClassNode(UEdGraph* Graph);
 	static UK2Node* CreateConstructObjectFromClassNode(UEdGraph* Graph);
 	static UK2Node* CreateDynamicCastNode(UEdGraph* Graph, const FString& TargetTypeName);
 	static UK2Node* CreateSwitchEnumNode(UEdGraph* Graph, const FString& EnumName);
+	static UK2Node* CreateGetArrayItemNode(UEdGraph* Graph);
+	static UK2Node* CreateKnotNode(UEdGraph* Graph);
 };
+
