@@ -2264,9 +2264,40 @@ UK2Node* FWeaveInterpreter::CreateCallNode(UEdGraph* Graph, const FString& Class
 
 				if (!Function)
 				{
-					UE_LOG(LogTemp, Warning, TEXT("[Weaver] Function not found: %s::%s (class exists but function doesn't)"), *FullClassName, *ResolvedFunctionName);
-					Graph->RemoveNode(CallNode);
-					return nullptr;
+					// 尝试在当前蓝图中自动创建函数
+					UBlueprint* Blueprint2 = Graph->GetTypedOuter<UBlueprint>();
+					if (Blueprint2)
+					{
+						UEdGraph* NewFuncGraph = FBlueprintEditorUtils::CreateNewGraph(
+							Blueprint2, FName(*ResolvedFunctionName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+						if (NewFuncGraph)
+						{
+							FBlueprintEditorUtils::AddFunctionGraph<UClass>(Blueprint2, NewFuncGraph, true, nullptr);
+							FKismetEditorUtilities::CompileBlueprint(Blueprint2);
+
+							UClass* BPClass2 = Blueprint2->SkeletonGeneratedClass
+								? Blueprint2->SkeletonGeneratedClass
+								: Blueprint2->GeneratedClass;
+							if (BPClass2)
+							{
+								Function = BPClass2->FindFunctionByName(*ResolvedFunctionName);
+								if (Function)
+								{
+									CallNode->SetFromFunction(Function);
+									CallNode->AllocateDefaultPins();
+									CallNode->ReconstructNode();
+									UE_LOG(LogTemp, Log, TEXT("[Weaver] Auto-created function '%s' in blueprint"), *ResolvedFunctionName);
+								}
+							}
+						}
+					}
+
+					if (!Function)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("[Weaver] Function not found: %s::%s (class exists but function doesn't)"), *FullClassName, *ResolvedFunctionName);
+						Graph->RemoveNode(CallNode);
+						return nullptr;
+					}
 				}
 			}
 		}
@@ -2297,6 +2328,34 @@ UK2Node* FWeaveInterpreter::CreateCallNode(UEdGraph* Graph, const FString& Class
 							}
 						}
 						break;
+					}
+				}
+
+				// 函数图表不存在，自动创建
+				if (!bFound)
+				{
+					UEdGraph* NewFuncGraph = FBlueprintEditorUtils::CreateNewGraph(
+						Blueprint, FName(*ResolvedFunctionName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+					if (NewFuncGraph)
+					{
+						FBlueprintEditorUtils::AddFunctionGraph<UClass>(Blueprint, NewFuncGraph, true, nullptr);
+						FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+						UClass* BPClass = Blueprint->SkeletonGeneratedClass
+							? Blueprint->SkeletonGeneratedClass
+							: Blueprint->GeneratedClass;
+						if (BPClass)
+						{
+							UFunction* Function = BPClass->FindFunctionByName(*ResolvedFunctionName);
+							if (Function)
+							{
+								CallNode->SetFromFunction(Function);
+								CallNode->AllocateDefaultPins();
+								CallNode->ReconstructNode();
+								bFound = true;
+								UE_LOG(LogTemp, Log, TEXT("[Weaver] Auto-created function '%s' in blueprint"), *ResolvedFunctionName);
+							}
+						}
 					}
 				}
 			}
