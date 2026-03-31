@@ -313,7 +313,33 @@ bool FWeaveGenerator::Generate(const TArray<UEdGraphNode*>& SelectedNodes, UEdGr
 					DefaultValue != TEXT("None"))
 				{
 						if (PinName.Contains(TEXT(" "))) 						{ 							PinName = FString::Printf(TEXT("\"%s\""), *PinName); 						}
-					Code += FString::Printf(TEXT("set %s.%s = %s\n"), *NodeId, *PinName, *DefaultValue);
+
+					// DefaultValue 中如果包含空格、关键字或特殊字符，需要用引号包裹
+					// 避免 Tokenizer 将其拆分导致 ParseSet 提前终止
+					FString SafeValue = DefaultValue;
+					static const TArray<FString> Keywords = {
+						TEXT("node"), TEXT("set"), TEXT("link"), TEXT("graph"), TEXT("graphset"), TEXT("var")
+					};
+					bool bNeedsQuote = DefaultValue.Contains(TEXT(" ")) || DefaultValue.Contains(TEXT("\t"))
+						|| DefaultValue.Contains(TEXT(".")) || DefaultValue.Contains(TEXT("="))
+						|| DefaultValue.Contains(TEXT("(")) || DefaultValue.Contains(TEXT(")"));
+					if (!bNeedsQuote)
+					{
+						for (const FString& Kw : Keywords)
+						{
+							if (DefaultValue == Kw)
+							{
+								bNeedsQuote = true;
+								break;
+							}
+						}
+					}
+					if (bNeedsQuote && !DefaultValue.StartsWith(TEXT("\"")))
+					{
+						SafeValue = FString::Printf(TEXT("\"%s\""), *DefaultValue.Replace(TEXT("\""), TEXT("\\\"")));
+					}
+
+					Code += FString::Printf(TEXT("set %s.%s = %s\n"), *NodeId, *PinName, *SafeValue);
 					EmittedPins.Add(Pin->PinName);
 				}
 			}

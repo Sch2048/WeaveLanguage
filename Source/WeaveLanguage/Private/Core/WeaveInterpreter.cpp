@@ -409,7 +409,14 @@ bool FWeaveInterpreter::ParseSet(const TArray<FString>& Tokens, int32& Index, FW
 
 	if (Index < Tokens.Num() && Tokens[Index].StartsWith(TEXT("\"")))
 	{
+		// 引号包裹的值，去掉首尾引号
 		Value = Tokens[Index++];
+		if (Value.StartsWith(TEXT("\"")) && Value.EndsWith(TEXT("\"")) && Value.Len() >= 2)
+		{
+			Value = Value.Mid(1, Value.Len() - 2);
+			// 还原转义的引号
+			Value = Value.Replace(TEXT("\\\""), TEXT("\""));
+		}
 	}
 	else
 	{
