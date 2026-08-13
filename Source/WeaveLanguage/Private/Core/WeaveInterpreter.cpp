@@ -22,6 +22,7 @@
 #include "K2Node_SwitchEnum.h"
 #include "K2Node_SpawnActorFromClass.h"
 #include "K2Node_ConstructObjectFromClass.h"
+#include "K2Node_GenericCreateObject.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_GetArrayItem.h"
 #include "K2Node_Knot.h"
@@ -2852,7 +2853,11 @@ UK2Node* FWeaveInterpreter::CreateSpawnActorFromClassNode(UEdGraph* Graph)
 
 UK2Node* FWeaveInterpreter::CreateConstructObjectFromClassNode(UEdGraph* Graph)
 {
-	UK2Node_ConstructObjectFromClass* ConstructNode = SpawnEditorNode<UK2Node_ConstructObjectFromClass>(Graph);
+	// UK2Node_ConstructObjectFromClass 声明为 UCLASS(abstract)，只是 SpawnActorFromClass、
+	// GenericCreateObject 等节点的公共基类。直接实例化它会触发引擎 ensure
+	//（"Class which was marked abstract was trying to be loaded"），且该节点在保存时会被置空。
+	// 通用的 "Construct Object from Class" 节点对应的具体子类是 UK2Node_GenericCreateObject。
+	UK2Node_GenericCreateObject* ConstructNode = SpawnEditorNode<UK2Node_GenericCreateObject>(Graph);
 	return ConstructNode;
 }
 
