@@ -85,3 +85,4 @@ void FWeaveLanguageModule::OnOpenDebugger()
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FWeaveLanguageModule, WeaveLanguage)
+

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Modules/ModuleManager.h"
-#include "Framework/Application/IInputProcessor.h"
 
 class FWeaveLanguageModule : public IModuleInterface
 {

@@ -31,11 +31,6 @@ FString UWeaveOperator::CachedResultWeave;
 TMap<FString, TArray<int32>> UWeaveOperator::KeywordIndex;
 TMap<FString, int32> UWeaveOperator::IdIndex;
 
-void UWeaveOperator::ExecuteOperation()
-{
-	UE_LOG(LogTemp, Log, TEXT("Weaver Operation Executed"));
-}
-
 TArray<FString> UWeaveOperator::GenerateKeywords(const FString& Title)
 {
 	TArray<FString> Keywords;
@@ -150,7 +145,8 @@ TSharedPtr<FJsonObject> UWeaveOperator::NodeToJson(UEdGraphNode* Node)
 	{
 		FString EventName = EventNode->EventReference.GetMemberName().ToString();
 		UClass* OwnerClass = EventNode->EventReference.GetMemberParentClass();
-		FString ClassName = OwnerClass ? OwnerClass->GetName().Replace(TEXT("_C"), TEXT("")) : TEXT("Unknown");
+		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+		ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 		JsonNode->SetStringField(TEXT("id"), FString::Printf(TEXT("event.%s.%s"), *ClassName, *EventName));
@@ -221,7 +217,8 @@ TSharedPtr<FJsonObject> UWeaveOperator::NodeToJson(UEdGraphNode* Node)
 
 		FString MemberName = FuncNode->FunctionReference.GetMemberName().ToString();
 		UClass* OwnerClass = Function->GetOwnerClass();
-		FString ClassName = OwnerClass ? OwnerClass->GetName().Replace(TEXT("_C"), TEXT("")) : TEXT("Unknown");
+		FString ClassName = OwnerClass ? OwnerClass->GetName() : TEXT("Unknown");
+		ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 		JsonNode->SetStringField(TEXT("id"), FString::Printf(TEXT("call.%s.%s"), *ClassName, *MemberName));
@@ -381,7 +378,8 @@ void UWeaveOperator::GenerateWeaveLanguage()
 			}
 
 			FString MemberName = Function->GetName();
-			FString ClassName = Class->GetName().Replace(TEXT("_C"), TEXT(""));
+			FString ClassName = Class->GetName();
+			ClassName.RemoveFromEnd(TEXT("_C"));
 
 
 			if (Function->HasAnyFunctionFlags(FUNC_BlueprintEvent))
@@ -2518,6 +2516,27 @@ bool UWeaveOperator::ApplyWeaveToBlueprintWithUndo(const FString& WeaveCode, con
 		}
 	}
 
+	// 如果找不到目标图表，尝试自动创建同名函数图表
+	if (!TargetGraph && !GraphName.Contains(TEXT("EventGraph")))
+	{
+		UEdGraph* NewFuncGraph = FBlueprintEditorUtils::CreateNewGraph(
+			BP, FName(*GraphName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		if (NewFuncGraph)
+		{
+			FBlueprintEditorUtils::AddFunctionGraph<UClass>(BP, NewFuncGraph, true, nullptr);
+			FKismetEditorUtilities::CompileBlueprint(BP);
+			TargetGraph = NewFuncGraph;
+			UE_LOG(LogTemp, Log, TEXT("[Weaver] Auto-created function graph: %s"), *GraphName);
+		}
+	}
+
+	// 回退到默认 EventGraph
+	if (!TargetGraph && BP->UbergraphPages.Num() > 0)
+	{
+		TargetGraph = BP->UbergraphPages[0];
+		UE_LOG(LogTemp, Log, TEXT("[Weaver] Falling back to default UbergraphPage: %s"), *TargetGraph->GetName());
+	}
+
 	if (!TargetGraph)
 	{
 		OutError = TEXT("Graph not found");
@@ -2531,29 +2550,37 @@ bool UWeaveOperator::ApplyWeaveToBlueprintWithUndo(const FString& WeaveCode, con
 		return false;
 	}
 
+	int32 NodesCreated = 0;
 
-	const FScopedTransaction Transaction(FText::FromString(TEXT("Apply Weave Code")));
-	TargetGraph->Modify();
-	BP->Modify();
-
-
-	TArray<UEdGraphNode*> NodesToRemove;
-	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	// 多图表模式
+	if (AST.Sections.Num() > 1)
 	{
-		if (Node && !Node->IsA<UK2Node_FunctionEntry>())
+		NodesCreated = FWeaveInterpreter::GenerateMultiGraph(AST, BP, OutError);
+	}
+	else
+	{
+		// 单图表模式（原有逻辑）
+		const FScopedTransaction Transaction(FText::FromString(TEXT("Apply Weave Code")));
+		TargetGraph->Modify();
+		BP->Modify();
+
+		TArray<UEdGraphNode*> NodesToRemove;
+		for (UEdGraphNode* Node : TargetGraph->Nodes)
 		{
-			Node->BreakAllNodeLinks();
-			NodesToRemove.Add(Node);
+			if (Node && !Node->IsA<UK2Node_FunctionEntry>())
+			{
+				Node->BreakAllNodeLinks();
+				NodesToRemove.Add(Node);
+			}
 		}
+
+		for (UEdGraphNode* Node : NodesToRemove)
+		{
+			TargetGraph->Nodes.Remove(Node);
+		}
+
+		NodesCreated = FWeaveInterpreter::GenerateBlueprint(AST, TargetGraph, OutError);
 	}
-
-	for (UEdGraphNode* Node : NodesToRemove)
-	{
-		TargetGraph->Nodes.Remove(Node);
-	}
-
-
-	int32 NodesCreated = FWeaveInterpreter::GenerateBlueprint(AST, TargetGraph, OutError);
 
 
 	if (NodesCreated >= 0)
