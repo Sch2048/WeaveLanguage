@@ -564,7 +564,10 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 	{
 		return TEXT("special.SpawnActorFromClass");
 	}
-	else if (ClassName == TEXT("K2Node_ConstructObjectFromClass"))
+	// GenericCreateObject 是还原端实际创建的具体类；ConstructObjectFromClass 是抽象基类，
+	// 仅为兼容早前版本错误创建出来的存量节点而保留。两者都映射到同一个 schema id。
+	else if (ClassName == TEXT("K2Node_GenericCreateObject") ||
+	         ClassName == TEXT("K2Node_ConstructObjectFromClass"))
 	{
 		return TEXT("special.ConstructObjectFromClass");
 	}
