@@ -446,7 +446,6 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 		{
 			const UClass* OwnerClass = Function->GetOwnerClass();
 			FString ClassName = OwnerClass ? StripUEClassPrefix(OwnerClass->GetName()) : TEXT("Unknown");
-
 			return FString::Printf(TEXT("message.%s.%s"), *ClassName, *Function->GetName());
 		}
 	}
@@ -456,7 +455,6 @@ FString FWeaveGenerator::GetNodeSchemaId(UEdGraphNode* Node)
 		{
 			const UClass* OwnerClass = Function->GetOwnerClass();
 			FString ClassName = OwnerClass ? StripUEClassPrefix(OwnerClass->GetName()) : TEXT("Unknown");
-
 			return FString::Printf(TEXT("call.%s.%s"), *ClassName, *Function->GetName());
 		}
 	}
